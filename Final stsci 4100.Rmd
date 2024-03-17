@@ -1,0 +1,250 @@
+---
+title: "STSCI 4100 Final"
+author: "Jasmine Umrigar"
+date: "2023-04-01"
+output: word_document
+---
+
+
+```{r}
+library(tidyverse)
+
+#import the merged data from python
+master_data <- read.csv("Arsenic_oil_employment_merged.csv")
+colnames(master_data)[which(names(master_data) == "Avereage_oil")] <- "Average_oil"
+
+
+#make new columns for incidence
+master_data$Bladder_Incidence<-as.integer(master_data$Bladder_Count)/master_data$Population_count*100000
+master_data$Colo_Incidence<-as.integer(master_data$Colorectal_Count)/master_data$Population_count*100000
+master_data$Kidney_Incidence<- master_data$Kidney_Count/master_data$Population_count*100000
+
+#convert oil and gas to binary
+# 1 for if there is oil production, 0 for none 
+master_data$Oil_bin <- as.numeric(master_data$Average_oil > 0)
+
+master_data$Average_gas<-apply(master_data[,53:63],1,mean)
+master_data$Gas_bin <- as.numeric(master_data$Average_gas > 0)
+
+#remove unnecessary columns 
+
+master_data_drop<-master_data[,-c(41:67)]
+
+#reorganize columns
+master_data_drop<-master_data_drop[, c(1:4, 42, 8, 5:7, 43:45, 9:10, 22, 23, 11:21, 24:41, 46:48)]
+
+```
+
+PCA on Unemployment Data
+
+```{r}
+res<-prcomp(master_data_drop[,31:41], scale=TRUE)
+par(mfrow=c(1,1))
+
+plot(res)
+#res$x
+
+#add pca to old data
+
+pca<-cbind(master_data_drop,res$x[,1])
+colnames(pca)[which(names(pca) == "res$x[, 1]")] <- "Unemployment_pca"
+
+#drop unemployment columns
+pca_drop<-pca[,-c(31:41)]
+
+#rearrange columns
+pca_drop<-pca_drop[,c(1:32,38, 33:37)]
+
+#categorize states
+pca_drop$State_cat<- case_when(
+    (pca_drop$State_x=='California' | pca_drop$State_x=='Washington' | pca_drop$State_x=='Oregon') ~ 'West Coast',
+    (pca_drop$State_x=='Kentucky' | pca_drop$State_x=='Iowa' | pca_drop$State_x=='Missouri')~ 'Mid West',
+    TRUE~'East Coast'
+  )
+pca_drop<-pca_drop[, c(39, 1:38)]
+
+
+```
+
+Descriptive Statistics
+```{r}
+#group by state 
+pca_group<-pca_drop %>% 
+  group_by(State_x) %>% 
+  summarize(num_counties = n(),
+            mean_pop = mean(Population_count),
+            mean_unemploy = mean(average_unemployment_rate),
+            mean_oil = mean(Average_oil),
+            average_percent_black=mean(Percent_Black))
+
+#summary table of oil states
+oil_states <- pca_drop %>% 
+  group_by(State_x) %>% 
+  summarize(mean_oil = mean(Average_oil)) %>%
+  filter(mean_oil != 0) %>%
+  arrange(desc(mean_oil))
+oil_states
+
+#summary of gas states
+gas_states <- pca_drop %>% 
+  group_by(State_x) %>% 
+  summarize(mean_gas = mean(Average_gas)) %>%
+  filter(mean_gas != 0) %>%
+  arrange(desc(mean_gas))
+gas_states
+
+```
+
+Graphs
+
+```{r}
+#look at oil production by state
+options(scipen=999)
+ggplot(data = oil_states) +
+  geom_bar(mapping = aes(x = mean_oil, y = State_x), stat = "identity")+
+  ylab("State")+
+  xlab("Average Annual Crude Oil Withdrawls")+
+  ggtitle('Average Annual Crude Oil Withdrawls by State')
+```
+
+```{r}
+options(scipen=999)
+ggplot(data = gas_states) +
+  geom_bar(mapping = aes(x = mean_gas, y = State_x), stat = "identity")+
+  ylab("State")+
+  xlab("Average Annual Gas Withdrawls")+
+  ggtitle('Average Annual Gas Withdrawls by State')
+
+```
+
+```{r}
+#plot looking at the distribution of unemployment
+ggplot(data = pca_drop) +
+  geom_boxplot(mapping = aes(x = average_unemployment_rate, 
+                             y = State_x)) +
+  labs(x = "Average Unemployment Rate", y = "State",
+       title = "Average Unemployment Rate by State")
+
+```
+
+```{r}
+#distribution of state percent black
+ggplot(data = pca_drop) +
+  geom_boxplot(mapping = aes(x = Percent_Black, 
+                             y = State_x)) +
+  labs(x = "Average % of Black People", y = "State",
+       title = "Average % of Black People by State")
+```
+
+```{r}
+#distribution of percent male 
+ggplot(data = pca_drop) +
+  geom_boxplot(mapping = aes(x = Percent_Male, 
+                             y = State_x)) +
+  labs(x = "Average % of Males", y = "State",
+       title = "Average % of Males by State")
+```
+
+```{r}
+#drop one outlier
+pca_drop_pop<-pca_drop[which(pca_drop$Population_count<5000000),]
+
+#distribution of population count
+ggplot(data = pca_drop_pop) +
+  geom_boxplot(mapping = aes(x = Population_count, 
+                             y = State_x)) +
+  labs(x = "Population per State", y = "State",
+       title = "Average Population per State")
+```
+
+```{r}
+# look at mean incidence per category of aresnic level
+pca_group2<-pca_drop %>% 
+  group_by(weighted_cat) %>% 
+  summarize(mean_colo = mean(Colo_Incidence),
+            mean_kideny=mean(Kidney_Incidence),
+            mean_blad=mean(Bladder_Incidence))
+
+pca_group2
+
+```
+
+```{r}
+#corelation map
+install.packages('reshape2')
+library(reshape2)
+
+cor_mat<-cor(pca_drop[,-c(1:5,7:10,31:33,35)])
+melt_cor<-melt(cor_mat)
+#pairs(Bladder_data[,c(8:10, 13:16)], cex = 0.5)
+
+library(ggplot2)
+ggplot(data = melt_cor, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()+scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 5, hjust = 1))+
+  theme(axis.text.y=element_text(size=5))
+
+cor_mat
+```
+
+```{r}
+
+#drop the outliers of arsenic level
+
+pca_drop <- pca_drop[which(pca_drop$weighted < 150),]
+hist(pca_drop$Colo_Incidence)
+
+
+plot(pca_drop$weighted, pca_drop$Bladder_Incidence, xlab = 'weighted arsenic', ylab='Bladder Incidence')
+
+```
+
+Simple Linear Regressions
+```{r}
+#regression endoscopy and unemployment
+lm_endo<-lm(pca_drop$Percent_Ever_Had_Endoscopy~pca_drop$Unemployment_pca)
+summary(lm_endo)
+
+plot(pca_drop$Percent_Ever_Had_Endoscopy~pca_drop$Unemployment_pca)
+abline(lm_endo)
+```
+
+```{r}
+#regression EQI and endoscopy
+lm_EQI<-lm(pca_drop$EQI_SD~pca_drop$Percent_Ever_Had_Endoscopy)
+summary(lm_EQI)
+
+plot(pca_drop$EQI_SD~pca_drop$Percent_Ever_Had_Endoscopy)
+abline(lm_EQI)
+```
+
+```{r}
+#regression Kidney and bladder
+lm_Kidney<-lm(pca_drop$Kidney_Incidence~pca_drop$Bladder_Incidence)
+summary(lm_Kidney)
+
+plot(pca_drop$Kidney_Incidence~pca_drop$Bladder_Incidence)
+abline(lm_Kidney)
+```
+
+```{r}
+#EQI air and urban influence code regression
+lm_air<-lm(pca_drop$EQI_AIR~pca_drop$Urban_influence_code_2013)
+summary(lm_air)
+
+plot(pca_drop$EQI_AIR~pca_drop$Urban_influence_code_2013)
+abline(lm_air)
+
+```
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
